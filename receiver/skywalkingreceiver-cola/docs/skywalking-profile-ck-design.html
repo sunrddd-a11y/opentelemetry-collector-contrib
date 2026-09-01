@@ -1,0 +1,877 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SkyWalking Cola Profile · ClickHouse 最优方案</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;700;900&family=Noto+Serif+SC:wght@600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --ink: #1a1612;
+      --paper: #f4efe6;
+      --paper-2: #ebe4d6;
+      --card: #fffdf8;
+      --line: #d8cbb6;
+      --muted: #6f675c;
+      --accent: #c45c26;
+      --accent-2: #1f6f8b;
+      --green: #2f6b4f;
+      --trace: #5b4bb4;
+      --flame: #d97706;
+      --shadow: 0 18px 50px rgba(26, 22, 18, 0.08);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background:
+        radial-gradient(1200px 500px at 10% -10%, #fde8d2 0%, transparent 50%),
+        var(--paper);
+      color: var(--ink);
+      font-family: "Noto Sans SC", "PingFang SC", sans-serif;
+      line-height: 1.7;
+    }
+    a { color: var(--accent-2); }
+    .wrap { max-width: 1120px; margin: 0 auto; padding: 32px 24px 96px; }
+    nav.toc {
+      position: sticky; top: 0; z-index: 20;
+      display: flex; gap: 8px; flex-wrap: wrap;
+      padding: 12px 0 14px;
+      background: color-mix(in srgb, var(--paper) 88%, white);
+      backdrop-filter: blur(10px);
+      border-bottom: 1px solid var(--line);
+    }
+    nav.toc a {
+      text-decoration: none;
+      font-size: 12px;
+      color: var(--muted);
+      border: 1px solid var(--line);
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: var(--card);
+    }
+    nav.toc a:hover { color: var(--ink); border-color: var(--accent); }
+    header.hero {
+      display: grid;
+      grid-template-columns: 1.3fr 0.9fr;
+      gap: 28px;
+      padding: 36px 0 20px;
+      align-items: end;
+    }
+    .kicker {
+      letter-spacing: 0.18em;
+      font-size: 12px;
+      color: var(--accent);
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    h1 {
+      font-family: "Noto Serif SC", serif;
+      font-size: clamp(32px, 5vw, 52px);
+      line-height: 1.15;
+      margin: 8px 0 16px;
+    }
+    .lede { font-size: 18px; color: #3b352c; max-width: 62ch; }
+    .verdict {
+      background: var(--ink);
+      color: #f7f1e6;
+      padding: 22px 22px 18px;
+      border-radius: 18px;
+      box-shadow: var(--shadow);
+    }
+    .verdict h2 { margin: 0 0 8px; font-size: 15px; color: #e7b089; letter-spacing: 0.08em; }
+    .verdict p { margin: 0; font-size: 14px; line-height: 1.65; color: #efe7da; }
+    h2.sec {
+      font-family: "Noto Serif SC", serif;
+      font-size: 28px;
+      margin: 56px 0 8px;
+      padding-top: 8px;
+    }
+    h3 { font-size: 18px; margin: 28px 0 10px; }
+    p.note { color: var(--muted); margin-top: 0; }
+    .grid-3, .grid-2 { display: grid; gap: 14px; }
+    .grid-3 { grid-template-columns: repeat(3, 1fr); }
+    .grid-2 { grid-template-columns: 1fr 1fr; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 16px 18px;
+      box-shadow: var(--shadow);
+    }
+    .card h3 { margin: 0 0 8px; }
+    .tag {
+      display: inline-block;
+      font-size: 11px;
+      border-radius: 999px;
+      padding: 2px 8px;
+      margin-bottom: 8px;
+      font-weight: 700;
+    }
+    .tag.ok { background: #d9efe3; color: var(--green); }
+    .tag.no { background: #f8ddd3; color: #9a3412; }
+    .tag.mid { background: #fdecc8; color: #92400e; }
+    table.cmp {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--card);
+      border-radius: 16px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+    }
+    table.cmp th, table.cmp td {
+      text-align: left;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      font-size: 14px;
+      vertical-align: top;
+    }
+    table.cmp th { background: var(--paper-2); font-size: 13px; }
+    table.cmp tr:last-child td { border-bottom: 0; }
+    .pick { background: #fff4e8; font-weight: 700; }
+    table.fields {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--card);
+      border-radius: 16px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      margin: 10px 0 28px;
+    }
+    table.fields th, table.fields td {
+      text-align: left;
+      padding: 9px 12px;
+      border-bottom: 1px solid var(--line);
+      font-size: 13px;
+      vertical-align: top;
+    }
+    table.fields th { background: var(--paper-2); font-size: 12px; }
+    table.fields tr:last-child td { border-bottom: 0; }
+    table.fields td.col {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 12px;
+      white-space: nowrap;
+      color: #3b2f22;
+    }
+    table.fields td.typ { color: var(--muted); font-size: 12px; white-space: nowrap; }
+    .src {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 700;
+      border-radius: 999px;
+      padding: 1px 7px;
+      white-space: nowrap;
+    }
+    .src.agent { background: #fdecc8; color: #92400e; }
+    .src.task { background: #d9efe3; color: var(--green); }
+    .src.recv { background: #ddd6fe; color: var(--trace); }
+    .src.ck { background: #e0f2fe; color: var(--accent-2); }
+    .src.user { background: #f8ddd3; color: #9a3412; }
+    .diagram {
+      background: #221c16;
+      color: #f3eadc;
+      border-radius: 20px;
+      padding: 18px 10px 8px;
+      overflow-x: auto;
+      box-shadow: var(--shadow);
+    }
+    .diagram figcaption {
+      color: #cbbba6;
+      font-size: 12px;
+      text-align: center;
+      padding: 4px 0 10px;
+    }
+    svg text { font-family: "Noto Sans SC", sans-serif; }
+    .mono, pre, code {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+    }
+    pre {
+      background: #1f1a15;
+      color: #f0e6d6;
+      padding: 16px 18px;
+      border-radius: 14px;
+      overflow-x: auto;
+      font-size: 12.5px;
+      line-height: 1.55;
+    }
+    code { font-size: 0.92em; background: #efe6d7; padding: 1px 5px; border-radius: 4px; }
+    pre code { background: none; padding: 0; color: inherit; }
+    .sql-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .pill-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 0; }
+    .pill {
+      border: 1px solid var(--line);
+      background: var(--paper-2);
+      border-radius: 999px;
+      padding: 6px 12px;
+      font-size: 13px;
+    }
+    .callout {
+      border-left: 4px solid var(--accent);
+      background: #fff6ed;
+      padding: 12px 16px;
+      border-radius: 0 12px 12px 0;
+      margin: 16px 0;
+    }
+    footer {
+      margin-top: 64px;
+      color: var(--muted);
+      font-size: 13px;
+      border-top: 1px solid var(--line);
+      padding-top: 18px;
+    }
+    @media (max-width: 860px) {
+      header.hero, .grid-3, .grid-2, .sql-grid { grid-template-columns: 1fr; }
+      nav.toc { position: static; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <nav class="toc">
+      <a href="#verdict">结论</a>
+      <a href="#why">为何最优</a>
+      <a href="#arch">全链路</a>
+      <a href="#proto">协议时序</a>
+      <a href="#dispatch">下发与状态</a>
+      <a href="#tables">表设计</a>
+      <a href="#columns">字段说明</a>
+      <a href="#trace">Trace 关联</a>
+      <a href="#query">查询形态</a>
+      <a href="#ha">可用性</a>
+      <a href="#recv">Receiver 职责</a>
+    </nav>
+
+    <header class="hero">
+      <div>
+        <div class="kicker">skywalkingreceiver-cola · v0.159.0</div>
+        <h1>用 ClickHouse 承接 SkyWalking Profile：一套能画火焰图、也能下钻链路的方案</h1>
+        <p class="lede">
+          Agent 的剖析不是 pprof，而是「领任务 → 命中 endpoint 后按间隔 dump → 结束回写状态」。
+          只留两张表：任务用 INSERT + <code>FINAL</code> 看最新状态；快照按
+          <em>segment_id + sequence</em> 存时间线。火焰图对快照现算，链路用 <code>segment_id</code> 对齐 span。
+        </p>
+      </div>
+      <aside class="verdict" id="verdict">
+        <h2>最优方案一句话</h2>
+        <p>
+          任务表一行一个实例，<code style="background:#3a3128;color:#f7d9c0">status=running/finished</code>。
+          Receiver <code style="background:#3a3128;color:#f7d9c0">SELECT ... FINAL</code> 后再按主键去重下发；
+          Finish 再 INSERT 一行，该实例不再领同一任务。
+          快照一行一次 dump；点 span 用 <code style="background:#3a3128;color:#f7d9c0">segment_id</code>，火焰图对 snapshots 现算。
+        </p>
+      </aside>
+    </header>
+
+    <h2 class="sec" id="why">1. 为什么这是最优</h2>
+    <p class="note">对比过 YAML 静态任务、转 logs、转 pprofile、走官方 otel_profiles 表、以及边表 + finish 表。当前落地是「两张 CK 表 + INSERT 覆盖状态 + 查询时现算火焰图」。</p>
+
+    <table class="cmp">
+      <thead>
+        <tr>
+          <th>方案</th>
+          <th>任务来源</th>
+          <th>火焰图</th>
+          <th>按 Trace 下钻</th>
+          <th>结论</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>YAML profile_tasks + logs</td>
+          <td>配置文件，改任务要发版</td>
+          <td>栈在 log body 里，聚合费劲</td>
+          <td>属性能带 segment，但不一等公民</td>
+          <td>适合 Demo，不适合你们只认 CK 的生产</td>
+        </tr>
+        <tr>
+          <td>OTel pprofile + 官方 profiles 表</td>
+          <td>仍要另找任务源</td>
+          <td>模型是 CPU sample，和 SW 线程 dump 别扭</td>
+          <td>缺 sequence / segment 语义</td>
+          <td>信号时髦，查询对不齐业务</td>
+        </tr>
+        <tr class="pick">
+          <td>CK 任务表 + 快照明细（无边表）</td>
+          <td>SQL INSERT 任务；Finish 再 INSERT 状态</td>
+          <td>Array 栈，查询时 ARRAY JOIN 现算</td>
+          <td>segment_id 对齐 span；otel_trace_id 可空</td>
+          <td>选定。两张表覆盖控制面和数据面</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="grid-3" style="margin-top:16px">
+      <div class="card">
+        <span class="tag ok">控制面</span>
+        <h3>任务只存在 CK</h3>
+        <p>Agent 轮询很勤，RPC 不打库。每 15s <code>SELECT ... FINAL</code>，按主键 <code>updated_at</code> 去重后进内存。下发看 service / 实例 / status / lastCommandTime，<strong>不按</strong> StartTime、Duration 过滤。</p>
+      </div>
+      <div class="card">
+        <span class="tag ok">数据面</span>
+        <h3>快照直写专用表</h3>
+        <p>一行一次 dump。同一 <code>segment_id</code> 会有多行（<code>sequence</code> 0、1、2…，间隔 = <code>dump_period_ms</code>）。能补则补 TraceId，空了用 <code>segment_id</code> 查。</p>
+      </div>
+      <div class="card">
+        <span class="tag ok">查询面</span>
+        <h3>一张明细，两种查法</h3>
+        <p>点开 span 用 <code>segment_id</code> 读栈序列；任务/时间范围火焰图对同一张表 <code>ARRAY JOIN</code> 现算。</p>
+      </div>
+    </div>
+
+    <h2 class="sec" id="arch">2. 全链路架构</h2>
+    <p class="note">Profile 控制与存储由 cola receiver 直连 ClickHouse；Traces 仍走现有 clickhouseexporter，两套数据用 TraceId / segment_id 会合。</p>
+
+    <figure class="diagram">
+      <svg viewBox="0 0 1080 430" width="100%" height="auto" role="img" aria-label="全链路架构图">
+        <defs>
+          <linearGradient id="g1" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#3a2c22"/><stop offset="1" stop-color="#2a211b"/>
+          </linearGradient>
+        </defs>
+        <!-- boxes -->
+        <rect x="30" y="150" rx="14" width="160" height="90" fill="#c45c26"/>
+        <text x="110" y="188" text-anchor="middle" fill="#fff" font-size="15" font-weight="700">Java Agent</text>
+        <text x="110" y="210" text-anchor="middle" fill="#ffd7bc" font-size="11">SW 8.9+ gRPC</text>
+
+        <rect x="250" y="40" rx="14" width="250" height="310" fill="url(#g1)" stroke="#e7b089" stroke-width="1"/>
+        <text x="375" y="70" text-anchor="middle" fill="#e7b089" font-size="13" font-weight="700">skywalking_cola Receiver</text>
+        <rect x="270" y="90" rx="10" width="210" height="54" fill="#1f6f8b"/>
+        <text x="375" y="112" text-anchor="middle" fill="#fff" font-size="13">任务缓存 15s</text>
+        <text x="375" y="130" text-anchor="middle" fill="#cde7f0" font-size="11">GetProfileTaskCommands</text>
+        <rect x="270" y="156" rx="10" width="210" height="54" fill="#5b4bb4"/>
+        <text x="375" y="178" text-anchor="middle" fill="#fff" font-size="13">segment → trace LRU</text>
+        <text x="375" y="196" text-anchor="middle" fill="#ddd6fe" font-size="11">由 traces Consume 填充</text>
+        <rect x="270" y="222" rx="10" width="210" height="54" fill="#c45c26"/>
+        <text x="375" y="244" text-anchor="middle" fill="#fff" font-size="13">快照攒批写入</text>
+        <text x="375" y="262" text-anchor="middle" fill="#ffd7bc" font-size="11">CollectSnapshot / Finish</text>
+        <rect x="270" y="288" rx="10" width="210" height="44" fill="#2f6b4f"/>
+        <text x="375" y="315" text-anchor="middle" fill="#fff" font-size="13">Traces pipeline 不变</text>
+
+        <rect x="580" y="40" rx="14" width="230" height="130" fill="#3d342b" stroke="#7dd3c0"/>
+        <text x="695" y="70" text-anchor="middle" fill="#7dd3c0" font-size="13" font-weight="700">ClickHouse · Profile</text>
+        <text x="695" y="108" text-anchor="middle" fill="#f3eadc" font-size="12">sw_profile_tasks</text>
+        <text x="695" y="132" text-anchor="middle" fill="#f3eadc" font-size="12">sw_profile_snapshots</text>
+        <text x="695" y="156" text-anchor="middle" fill="#cbbba6" font-size="11">火焰图查询时现算</text>
+
+        <rect x="580" y="200" rx="14" width="230" height="90" fill="#3d342b" stroke="#a78bfa"/>
+        <text x="695" y="235" text-anchor="middle" fill="#c4b5fd" font-size="13" font-weight="700">ClickHouse · Traces</text>
+        <text x="695" y="262" text-anchor="middle" fill="#f3eadc" font-size="12">otel_traces</text>
+        <text x="695" y="280" text-anchor="middle" fill="#cbbba6" font-size="11">clickhouseexporter</text>
+
+        <rect x="860" y="90" rx="14" width="190" height="200" fill="#c45c26"/>
+        <text x="955" y="140" text-anchor="middle" fill="#fff" font-size="15" font-weight="700">查询层</text>
+        <text x="955" y="168" text-anchor="middle" fill="#ffd7bc" font-size="12">火焰图 ← snapshots 现算</text>
+        <text x="955" y="190" text-anchor="middle" fill="#ffd7bc" font-size="12">栈序列 ← segment_id</text>
+        <text x="955" y="212" text-anchor="middle" fill="#ffd7bc" font-size="12">Span 树 ← otel_traces</text>
+        <text x="955" y="248" text-anchor="middle" fill="#fff" font-size="12">JOIN 键：segment_id</text>
+        <text x="955" y="266" text-anchor="middle" fill="#fff" font-size="12">otel_trace_id 可空</text>
+
+        <!-- arrows -->
+        <g stroke="#e7b089" stroke-width="2" fill="none" marker-end="url(#arrow)">
+          <defs>
+            <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+              <path d="M0,0 L8,4 L0,8 z" fill="#e7b089"/>
+            </marker>
+          </defs>
+          <path d="M190,195 H250"/>
+          <path d="M500,110 H580"/>
+          <path d="M500,250 H580"/>
+          <path d="M810,105 H860"/>
+          <path d="M810,245 H860"/>
+          <path d="M695,170 V200"/>
+        </g>
+        <text x="220" y="140" fill="#cbbba6" font-size="11" text-anchor="middle">gRPC 21800</text>
+      </svg>
+      <figcaption>图 1 · 两张 Profile 表 + 现网 traces；查询层用 segment_id 会合</figcaption>
+    </figure>
+
+    <h2 class="sec" id="proto">3. 三个 RPC 各自干什么</h2>
+    <p class="note">这是 SkyWalking in-process profiling，不是 eBPF，也不是 pprof。没有第一条 Command，后面两条永远不会来。</p>
+
+    <figure class="diagram">
+      <svg viewBox="0 0 1080 340" width="100%" height="auto" role="img" aria-label="协议时序">
+        <text x="140" y="28" text-anchor="middle" fill="#e7b089" font-size="13">Agent</text>
+        <text x="540" y="28" text-anchor="middle" fill="#e7b089" font-size="13">Receiver</text>
+        <text x="920" y="28" text-anchor="middle" fill="#e7b089" font-size="13">ClickHouse</text>
+        <line x1="140" y1="40" x2="140" y2="320" stroke="#6b5c4d" stroke-dasharray="4 6"/>
+        <line x1="540" y1="40" x2="540" y2="320" stroke="#6b5c4d" stroke-dasharray="4 6"/>
+        <line x1="920" y1="40" x2="920" y2="320" stroke="#6b5c4d" stroke-dasharray="4 6"/>
+
+        <line x1="920" y1="70" x2="540" y2="70" stroke="#7dd3c0" stroke-width="2"/>
+        <polygon points="540,70 552,65 552,75" fill="#7dd3c0"/>
+        <text x="730" y="62" text-anchor="middle" fill="#7dd3c0" font-size="12">每 15s FINAL + 按主键去重进缓存</text>
+
+        <line x1="140" y1="120" x2="540" y2="120" stroke="#e7b089" stroke-width="2"/>
+        <polygon points="540,120 528,115 528,125" fill="#e7b089"/>
+        <text x="340" y="112" text-anchor="middle" fill="#f3eadc" font-size="12">① GetProfileTaskCommands(service, lastCommandTime)</text>
+        <line x1="540" y1="148" x2="140" y2="148" stroke="#c45c26" stroke-width="2"/>
+        <polygon points="140,148 152,143 152,153" fill="#c45c26"/>
+        <text x="340" y="172" text-anchor="middle" fill="#ffd7bc" font-size="12">返回 Command[ProfileTaskQuery] · 不打 CK</text>
+
+        <line x1="140" y1="210" x2="540" y2="210" stroke="#e7b089" stroke-width="2"/>
+        <polygon points="540,210 528,205 528,215" fill="#e7b089"/>
+        <text x="340" y="202" text-anchor="middle" fill="#f3eadc" font-size="12">② CollectSnapshot stream ThreadSnapshot</text>
+        <line x1="540" y1="238" x2="920" y2="238" stroke="#c45c26" stroke-width="2"/>
+        <polygon points="920,238 908,233 908,243" fill="#c45c26"/>
+        <text x="730" y="230" text-anchor="middle" fill="#ffd7bc" font-size="12">攒批 INSERT snapshots（补 TraceId）</text>
+
+        <line x1="140" y1="290" x2="540" y2="290" stroke="#e7b089" stroke-width="2"/>
+        <polygon points="540,290 528,285 528,295" fill="#e7b089"/>
+        <text x="340" y="282" text-anchor="middle" fill="#f3eadc" font-size="12">③ ReportTaskFinish(taskId, instance)</text>
+        <line x1="540" y1="318" x2="920" y2="318" stroke="#7dd3c0" stroke-width="1.5"/>
+        <polygon points="920,318 908,313 908,323" fill="#7dd3c0"/>
+        <text x="730" y="310" text-anchor="middle" fill="#cbbba6" font-size="12">INSERT status=finished，回空 Commands</text>
+      </svg>
+      <figcaption>图 2 · 协议时序：只有 CK 里有匹配任务时，Agent 才会开始 dump</figcaption>
+    </figure>
+
+    <div class="grid-3" style="margin-top:16px">
+      <div class="card">
+        <h3>GetProfileTaskCommands</h3>
+        <p>Query：<code>service</code> / <code>serviceInstance</code> / <code>lastCommandTime</code>。内存匹配，不打 CK。同一 <code>task_id</code> 只下发一条；实例行优先于广播行 <code>''</code>。</p>
+      </div>
+      <div class="card">
+        <h3>CollectSnapshot</h3>
+        <p>流式 dump。同一请求（同一 <code>traceSegmentId</code>）会有多条，<code>sequence</code> 递增。协议<strong>没有 traceId</strong>，能补则补。</p>
+      </div>
+      <div class="card">
+        <h3>ReportTaskFinish</h3>
+        <p>实例级结束通知。再 INSERT 一行 <code>status=finished</code>（主键含该实例），回空 Commands。该实例不再领同一任务。</p>
+      </div>
+    </div>
+
+    <h2 class="sec" id="dispatch">3.1 下发规则与任务状态</h2>
+    <p class="note">查结束看 <code>status</code>，不要看窗口是否过期。窗口只给 Agent 用；Receiver 下发不按 StartTime / Duration 过滤。</p>
+
+    <div class="grid-2">
+      <div class="card">
+        <span class="tag mid">写入</span>
+        <h3>INSERT 即最新状态</h3>
+        <p>主键 <code>(service, task_id, service_instance)</code>。建任务 <code>status='running'</code>。某实例 <code>ReportTaskFinish</code> 再 INSERT 一行同主键、<code>status='finished'</code>，内存立刻 Upsert，不用等 15s。</p>
+        <p>A 结束只动 A 那一行。广播行 <code>service_instance=''</code> 仍会发给未结束的实例。</p>
+      </div>
+      <div class="card">
+        <span class="tag ok">下发</span>
+        <h3>何时不下发</h3>
+        <p>加载：<code>SELECT ... FINAL</code> 后按主键用 <code>updated_at</code> 去重（merge 前 FINAL 仍可能重复）。</p>
+        <p>跳过：<code>finished</code> / <code>enabled=0</code> / 服务名不对 / 实例不匹配 / <code>create_time ≤ lastCommandTime</code> / 该实例已有同 <code>task_id</code> 的 finished 行。</p>
+      </div>
+    </div>
+
+    <pre><code>INSERT INTO otel.sw_profile_tasks
+(task_id, service, service_instance, endpoint_name,
+ duration_seconds, min_duration_threshold_ms, dump_period_ms, max_sampling_count,
+ start_time, create_time, serial_number, enabled, status)
+VALUES
+('prof-cmc-alarm-message-20260901134842',
+ 'sk.colasoft.cas.alarm',          -- = SW_AGENT_NAME
+ 'sk_alarm@10.2.120.42',           -- = SW_AGENT_INSTANCE_NAME；'' 表示全实例
+ 'POST:/cmc_alarm/alarm/message',  -- 入口 span operationName
+ 600, 0, 100, 5,                   -- 秒；阈值；间隔≥10ms；采样数必须 1–9
+ now64(3), now64(3),
+ 'prof-cmc-alarm-message-20260901134842', 1, 'running');</code></pre>
+
+    <div class="callout">
+      查某实例是否结束：<code>SELECT status FROM otel.sw_profile_tasks FINAL WHERE task_id=? AND service_instance=?</code>。
+      <code>running</code> 进行中，<code>finished</code> 该实例已报结束。
+    </div>
+
+    <h2 class="sec" id="tables">4. ClickHouse 两张表</h2>
+    <p class="note">只留任务表和快照表。任务状态靠 INSERT + <code>FINAL</code> 取最新；火焰图对 snapshots 查询时现算。旧的边表 / finish 表不再创建。</p>
+
+    <div class="grid-2">
+      <div class="card">
+        <span class="tag mid">配置 · 源</span>
+        <h3>sw_profile_tasks</h3>
+        <p>ORDER BY <code>(service, task_id, service_instance)</code>，<code>ReplacingMergeTree</code>（无版本列）。一行一个实例；<code>status</code> 区分进行中 / 已结束。</p>
+        <div class="pill-row">
+          <span class="pill">实例进主键</span>
+          <span class="pill">status running/finished</span>
+          <span class="pill">FINAL + updated_at 去重</span>
+        </div>
+      </div>
+      <div class="card">
+        <span class="tag ok">明细 · 下钻</span>
+        <h3>sw_profile_snapshots</h3>
+        <p>ORDER BY <code>(segment_id, sequence)</code>。按 span 的 segment 连续读；<code>timestamp</code> 有 minmax 跳数索引。按天分区，TTL 14 天。</p>
+        <div class="pill-row">
+          <span class="pill">segment_id 主键前缀</span>
+          <span class="pill">idx_ts minmax</span>
+          <span class="pill">task_id bloom</span>
+          <span class="pill">火焰图现算</span>
+        </div>
+      </div>
+    </div>
+
+    <h2 class="sec" id="columns">4.1 每张表的字段</h2>
+    <p class="note">来源：<span class="src user">人工/SQL</span> 写入任务；<span class="src agent">Agent 协议</span>；<span class="src recv">Receiver 补齐</span>；<span class="src task">任务表带入</span>；<span class="src ck">ClickHouse 物化/默认</span>。</p>
+
+    <h3>sw_profile_tasks · 剖析任务（人工 INSERT）</h3>
+    <p class="note">ORDER BY <code>(service, task_id, service_instance)</code>，<code>ReplacingMergeTree</code>（无版本列）。Java Agent 在收下 Command 后会按 <code>ProfileConstants</code> 校验，非法值会丢掉任务但仍更新 <code>lastCommandTime</code>。</p>
+    <table class="fields">
+      <thead>
+        <tr><th>字段</th><th>类型</th><th>来源</th><th>说明</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="col">task_id</td><td class="typ">String</td><td><span class="src user">SQL</span></td>
+          <td>任务唯一 ID，下发给 Agent 的 <code>TaskId</code>。更新同一任务用相同 id 再 INSERT 一行（Replacing 按 <code>updated_at</code> 留最新）。</td>
+        </tr>
+        <tr>
+          <td class="col">service</td><td class="typ">String</td><td><span class="src user">SQL</span></td>
+          <td>SkyWalking 服务名，必须等于 Agent 的 <code>SW_AGENT_NAME</code>（例如 <code>sk.colasoft.cas.alarm</code>）。不是 OAP 的 base64 <code>service_id</code>。</td>
+        </tr>
+        <tr>
+          <td class="col">service_instance</td><td class="typ">String</td><td><span class="src user">SQL</span></td>
+          <td>进主键。空字符串 = 该服务下所有实例都下发。非空则必须等于 <code>SW_AGENT_INSTANCE_NAME</code>。一行一个实例，A 停用不会覆盖 B。</td>
+        </tr>
+        <tr>
+          <td class="col">endpoint_name</td><td class="typ">String</td><td><span class="src user">SQL</span></td>
+          <td>与入口 span 的 <code>operationName</code> 完全一致，如 <code>POST:/cmc_alarm/alarm/message</code>。Agent 只对首个 span 名相等的请求采栈。</td>
+        </tr>
+        <tr>
+          <td class="col">duration_seconds</td><td class="typ">UInt32</td><td><span class="src user">SQL</span></td>
+          <td>任务持续秒数。下发 Command 时换成<strong>分钟</strong>（向上取整）。Agent 要求 1–15 分钟。</td>
+        </tr>
+        <tr>
+          <td class="col">min_duration_threshold_ms</td><td class="typ">UInt32</td><td><span class="src user">SQL</span></td>
+          <td>入口 span 耗时低于该毫秒数则不采。0 = 命中 endpoint 就采。</td>
+        </tr>
+        <tr>
+          <td class="col">dump_period_ms</td><td class="typ">UInt32</td><td><span class="src user">SQL</span></td>
+          <td>线程栈采样间隔（毫秒）。Agent 要求 ≥ 10。估算帧耗时：<code>sample_count × dump_period_ms</code>。</td>
+        </tr>
+        <tr>
+          <td class="col">max_sampling_count</td><td class="typ">UInt32</td><td><span class="src user">SQL</span></td>
+          <td>本任务最多采几条请求。Agent 要求 <strong>1–9</strong>（必须 &lt; 10）。官方 UI / PG 常见值为 5。填 10 或 20 会被 Agent 丢弃。</td>
+        </tr>
+        <tr>
+          <td class="col">start_time</td><td class="typ">DateTime64(3)</td><td><span class="src user">SQL</span></td>
+          <td>Agent 侧开始时刻，下发为 epoch 毫秒。可晚于现在，Agent 会等到点再采。</td>
+        </tr>
+        <tr>
+          <td class="col">create_time</td><td class="typ">DateTime64(3)</td><td><span class="src user">SQL</span></td>
+          <td>任务创建时间，下发为 epoch 毫秒。Agent 用 <code>lastCommandTime</code> 去重：只有 <code>create_time &gt; lastCommandTime</code> 才收下。改任务必须刷新本字段。</td>
+        </tr>
+        <tr>
+          <td class="col">serial_number</td><td class="typ">String</td><td><span class="src user">SQL</span></td>
+          <td>Command 的 <code>SerialNumber</code>，可与 <code>task_id</code> 相同。</td>
+        </tr>
+        <tr>
+          <td class="col">enabled</td><td class="typ">UInt8</td><td><span class="src user">SQL</span></td>
+          <td>1 可下发，0 人工停用。与 <code>status</code> 独立：停用整行，不影响其他实例。</td>
+        </tr>
+        <tr>
+          <td class="col">status</td><td class="typ">String</td><td><span class="src user">SQL / Finish</span></td>
+          <td><code>running</code>（默认）或 <code>finished</code>。<code>ReportTaskFinish</code> 再 INSERT 一行，主键含该实例，<code>FINAL</code> 后即为结束。该实例不再领同一 <code>task_id</code>。</td>
+        </tr>
+        <tr>
+          <td class="col">extra</td><td class="typ">String</td><td><span class="src user">SQL</span></td>
+          <td>预留备注 / JSON，Receiver 不读。</td>
+        </tr>
+        <tr>
+          <td class="col">updated_at</td><td class="typ">DateTime64(3)</td><td><span class="src ck">默认 now64</span></td>
+          <td>普通列。Receiver 加载任务：<code>SELECT ... FINAL</code> 后再按主键用 <code>updated_at</code> 去重，避免 merge 前重复行被下发两次。</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>sw_profile_snapshots · 线程 dump 明细</h3>
+    <p class="note">协议 <code>ThreadSnapshot</code> 只有 taskId / traceSegmentId / time / sequence / 栈。没有 per-frame 耗时，也没有 traceId。</p>
+    <table class="fields">
+      <thead>
+        <tr><th>字段</th><th>类型</th><th>来源</th><th>说明</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="col">timestamp</td><td class="typ">DateTime64(3)</td><td><span class="src agent">Agent</span></td>
+          <td>本次 dump 时刻（<code>ThreadSnapshot.time</code> 毫秒）。分区键 <code>toDate(timestamp)</code>，TTL 14 天。</td>
+        </tr>
+        <tr>
+          <td class="col">task_id</td><td class="typ">String</td><td><span class="src agent">Agent</span></td>
+          <td>对应任务。Agent 原样回传 Command 里的 TaskId。</td>
+        </tr>
+        <tr>
+          <td class="col">service</td><td class="typ">String</td><td><span class="src task">任务 / LRU</span></td>
+          <td>优先按 <code>task_id</code> 从任务缓存带入；没有则用 segment LRU 里的服务名。两者都 miss 才为空。</td>
+        </tr>
+        <tr>
+          <td class="col">service_instance</td><td class="typ">String</td><td><span class="src task">任务 / LRU</span></td>
+          <td>任务指定了实例则用任务值；否则尝试用 segment LRU 里的实例名。</td>
+        </tr>
+        <tr>
+          <td class="col">endpoint_name</td><td class="typ">String</td><td><span class="src task">任务表</span></td>
+          <td>任务上的 endpoint，不是 Agent 再报一次。</td>
+        </tr>
+        <tr>
+          <td class="col">otel_trace_id</td><td class="typ">String</td><td><span class="src recv">LRU</span></td>
+          <td>同进程先收到该 segment 的 traces 时填入（OTel 16 字节 hex）。快照早于 segment、或 traces 只走 Kafka 时为空。查询请用 <code>segment_id</code> 关联。</td>
+        </tr>
+        <tr>
+          <td class="col">sw_trace_id</td><td class="typ">String</td><td><span class="src recv">LRU</span></td>
+          <td>SkyWalking <code>segment.traceId</code>（如 <code>xxx.180.yyy</code>）。同样依赖 LRU，可空。</td>
+        </tr>
+        <tr>
+          <td class="col">segment_id</td><td class="typ">String</td><td><span class="src agent">Agent</span></td>
+          <td><strong>与链路关联的主键</strong>。<code>ThreadSnapshot.traceSegmentId</code>。官方 OAP 也用它 JOIN segment。对齐 <code>otel_traces.SpanAttributes['sw8.segment_id']</code>。</td>
+        </tr>
+        <tr>
+          <td class="col">sequence</td><td class="typ">UInt32</td><td><span class="src agent">Agent</span></td>
+          <td>同一请求内第几次 dump，从 0 递增。一行不是一条请求；行数 ≈ 请求耗时 / <code>dump_period_ms</code>。连续两行栈可以完全相同（还停在同一方法）。</td>
+        </tr>
+        <tr>
+          <td class="col">stack_leaf_first</td><td class="typ">Array(String)</td><td><span class="src agent">Agent</span></td>
+          <td>Agent 原数组：<code>[0]</code> 是栈顶（leaf / 当前方法），末元素靠近线程入口。</td>
+        </tr>
+        <tr>
+          <td class="col">stack_root_first</td><td class="typ">Array(String)</td><td><span class="src ck">MATERIALIZED</span></td>
+          <td><code>arrayReverse(stack_leaf_first)</code>，根在下，供查询时画火焰图。不要在应用层再反一次。</td>
+        </tr>
+        <tr>
+          <td class="col">stack_hash</td><td class="typ">UInt64</td><td><span class="src ck">MATERIALIZED</span></td>
+          <td>对 <code>stack_root_first</code> 做 xxHash64，便于按整栈去重或聚合。</td>
+        </tr>
+        <tr>
+          <td class="col">stack_depth</td><td class="typ">UInt16</td><td><span class="src ck">MATERIALIZED</span></td>
+          <td>栈帧个数，<code>length(stack_root_first)</code>。</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="callout">
+      不再建 <code>sw_profile_flame_edges</code> / <code>sw_profile_task_finish</code>。单次 segment 或某个任务的火焰图，对 <code>sw_profile_snapshots</code> 做 <code>ARRAY JOIN</code> 现算。
+    </div>
+
+    <h3>快照表 DDL（核心）</h3>
+    <pre><code>CREATE TABLE otel.sw_profile_snapshots
+(
+    timestamp        DateTime64(3) CODEC(Delta, ZSTD(1)),
+    task_id          LowCardinality(String),
+    service          LowCardinality(String),
+    service_instance String,
+    endpoint_name    LowCardinality(String),
+    otel_trace_id    String CODEC(ZSTD(1)),
+    sw_trace_id      String CODEC(ZSTD(1)),
+    segment_id       String CODEC(ZSTD(1)),
+    sequence         UInt32,
+    stack_leaf_first Array(String) CODEC(ZSTD(1)),
+    stack_root_first Array(String) MATERIALIZED arrayReverse(stack_leaf_first),
+    stack_hash       UInt64 MATERIALIZED xxHash64(arrayStringConcat(stack_root_first, '\n')),
+    stack_depth      UInt16 MATERIALIZED length(stack_root_first),
+    INDEX idx_otel_trace otel_trace_id TYPE bloom_filter(0.001) GRANULARITY 1,
+    INDEX idx_sw_trace   sw_trace_id   TYPE bloom_filter(0.001) GRANULARITY 1,
+    INDEX idx_task       task_id       TYPE bloom_filter(0.01)  GRANULARITY 1,
+    INDEX idx_ts         timestamp     TYPE minmax GRANULARITY 1
+)
+ENGINE = MergeTree
+PARTITION BY toDate(timestamp)
+ORDER BY (segment_id, sequence)
+TTL toDate(timestamp) + INTERVAL 14 DAY
+SETTINGS ttl_only_drop_parts = 1;</code></pre>
+
+    <div class="callout">
+      <strong>栈方向：</strong>Java <code>codeSignatures[0]</code> 是栈顶（leaf）。火焰图要根在下，所以表内物化 <code>stack_root_first = arrayReverse(...)</code>。写入只存 Agent 原数组，避免应用层搞反。
+    </div>
+
+    <h3>任务表 DDL</h3>
+    <pre><code>CREATE TABLE otel.sw_profile_tasks (
+  task_id String,
+  service String,
+  service_instance String DEFAULT '',
+  endpoint_name String,
+  duration_seconds UInt32,
+  min_duration_threshold_ms UInt32,
+  dump_period_ms UInt32,
+  max_sampling_count UInt32,
+  start_time DateTime64(3),
+  create_time DateTime64(3),
+  serial_number String,
+  enabled UInt8 DEFAULT 1,
+  status LowCardinality(String) DEFAULT 'running',
+  extra String DEFAULT '',
+  updated_at DateTime64(3) DEFAULT now64(3)
+)
+ENGINE = ReplacingMergeTree
+ORDER BY (service, task_id, service_instance);</code></pre>
+
+    <h2 class="sec" id="trace">5. 和 Trace 怎么关联</h2>
+    <p class="note">协议不带 TraceId。写入时能补则补；查询主路径是 <code>segment_id</code>，不要依赖 <code>otel_trace_id</code> 非空。</p>
+
+    <div class="grid-2">
+      <div class="card">
+        <h3>写入路径（主路径）</h3>
+        <p>同一 <code>swReceiver</code> 先收 traces。每次 <code>ConsumeTraces</code> 把</p>
+        <p><code>sw8.segment_id → {otel_trace_id, sw_trace_id, service}</code></p>
+        <p>放进 LRU（约 10 万条 / 10 分钟）。快照到达时填两列 TraceId。快照早到、或 traces 只走 Kafka 时为空，属正常。</p>
+      </div>
+      <div class="card">
+        <h3>查询路径（会合）</h3>
+        <p>Span 树：<code>otel_traces WHERE TraceId = ?</code>，树边是 <code>SpanId / ParentSpanId</code>。</p>
+        <p>栈序列：<code>snapshots WHERE segment_id = ? ORDER BY sequence</code>。</p>
+        <p>对齐慢 span：<code>snapshots.segment_id = SpanAttributes['sw8.segment_id']</code>。</p>
+      </div>
+    </div>
+
+    <figure class="diagram" style="margin-top:16px">
+      <svg viewBox="0 0 1080 220" width="100%" height="auto">
+        <rect x="40" y="50" rx="12" width="240" height="120" fill="#5b4bb4"/>
+        <text x="160" y="95" text-anchor="middle" fill="#fff" font-size="15" font-weight="700">otel_traces</text>
+        <text x="160" y="122" text-anchor="middle" fill="#ddd6fe" font-size="12">TraceId · SpanId</text>
+        <text x="160" y="142" text-anchor="middle" fill="#ddd6fe" font-size="12">ParentSpanId · SpanName</text>
+        <text x="160" y="162" text-anchor="middle" fill="#c4b5fd" font-size="11">sw8.segment_id</text>
+
+        <rect x="420" y="50" rx="12" width="240" height="120" fill="#c45c26"/>
+        <text x="540" y="95" text-anchor="middle" fill="#fff" font-size="15" font-weight="700">snapshots</text>
+        <text x="540" y="122" text-anchor="middle" fill="#ffd7bc" font-size="12">otel_trace_id</text>
+        <text x="540" y="142" text-anchor="middle" fill="#ffd7bc" font-size="12">segment_id · sequence</text>
+        <text x="540" y="162" text-anchor="middle" fill="#ffedd5" font-size="11">stack_root_first</text>
+
+        <rect x="800" y="50" rx="12" width="240" height="120" fill="#2f6b4f"/>
+        <text x="920" y="100" text-anchor="middle" fill="#fff" font-size="15" font-weight="700">UI</text>
+        <text x="920" y="128" text-anchor="middle" fill="#bbf7d0" font-size="12">左侧 span 树</text>
+        <text x="920" y="148" text-anchor="middle" fill="#bbf7d0" font-size="12">右侧该节点栈 / 局部火焰图</text>
+
+        <text x="360" y="115" fill="#e7b089" font-size="20">→</text>
+        <text x="740" y="115" fill="#e7b089" font-size="20">→</text>
+        <text x="540" y="28" text-anchor="middle" fill="#cbbba6" font-size="12">用 sw8.segment_id 把树和栈钉在一起</text>
+      </svg>
+      <figcaption>图 3 · 链路页：树来自 traces，栈来自 snapshots，用 segment_id 对齐</figcaption>
+    </figure>
+
+    <h2 class="sec" id="query">6. 两种查询，两张表</h2>
+    <div class="sql-grid">
+      <div>
+        <h3>任务 / 时间范围火焰图</h3>
+        <p class="note">对 snapshots 现算，给 d3-flamegraph / Grafana 树。</p>
+        <pre><code>SELECT
+    if(d = 1, '', stack_root_first[d - 1]) AS parent_frame,
+    stack_root_first[d] AS frame,
+    count() AS value
+FROM otel.sw_profile_snapshots
+ARRAY JOIN arrayEnumerate(stack_root_first) AS d
+WHERE task_id = {task_id:String}
+  AND timestamp BETWEEN {from:DateTime} AND {to:DateTime}
+GROUP BY parent_frame, frame
+ORDER BY value DESC;</code></pre>
+      </div>
+      <div>
+        <h3>单次 Trace 的层级 + 栈</h3>
+        <p class="note">一次 HTTP ≈ 一个 segment ≈ 多行 dump。不要按 segment_id 去重只留一行。</p>
+        <pre><code>-- span 树
+SELECT SpanId, ParentSpanId, SpanName, Duration,
+       SpanAttributes['sw8.segment_id'] AS segment_id
+FROM otel.otel_traces
+WHERE TraceId = {id:String};
+
+-- 该 segment 的 dump 时间线（多行）
+SELECT timestamp, sequence, stack_root_first
+FROM otel.sw_profile_snapshots
+WHERE segment_id = {segment_id:String}
+ORDER BY sequence;
+
+-- 这次请求的火焰图
+SELECT
+    if(d = 1, '', stack_root_first[d - 1]) AS parent_frame,
+    stack_root_first[d] AS frame,
+    count() AS value
+FROM otel.sw_profile_snapshots
+ARRAY JOIN arrayEnumerate(stack_root_first) AS d
+WHERE segment_id = {segment_id:String}
+GROUP BY parent_frame, frame;</code></pre>
+      </div>
+    </div>
+
+    <figure class="diagram" style="margin-top:8px">
+      <svg viewBox="0 0 1080 200" width="100%" height="auto" aria-label="火焰图示意">
+        <text x="40" y="28" fill="#e7b089" font-size="13">火焰图示意（root 在下）</text>
+        <rect x="80" y="150" width="920" height="28" fill="#c45c26"/>
+        <text x="540" y="169" text-anchor="middle" fill="#fff" font-size="12">java.lang.Thread.run</text>
+        <rect x="120" y="118" width="700" height="28" fill="#d97706"/>
+        <text x="470" y="137" text-anchor="middle" fill="#fff" font-size="12">okhttp3.internal.http.RealInterceptorChain.proceed</text>
+        <rect x="160" y="86" width="520" height="28" fill="#ea580c"/>
+        <text x="420" y="105" text-anchor="middle" fill="#fff" font-size="12">com.demo.order.CheckoutService.pay</text>
+        <rect x="200" y="54" width="220" height="28" fill="#b45309"/>
+        <text x="310" y="73" text-anchor="middle" fill="#fff" font-size="11">JDBC.execute</text>
+        <rect x="430" y="54" width="200" height="28" fill="#92400e"/>
+        <text x="530" y="73" text-anchor="middle" fill="#fff" font-size="11">Redis.get</text>
+        <text x="900" y="80" fill="#cbbba6" font-size="12">宽度 = sample_count</text>
+      </svg>
+      <figcaption>图 4 · 对 snapshots 现算的火焰图：宽段表示该帧在 dump 中出现更频繁，通常对应慢方法</figcaption>
+    </figure>
+
+    <h2 class="sec" id="ha">7. 可用性怎么保证</h2>
+    <div class="grid-3">
+      <div class="card">
+        <h3>存储</h3>
+        <p>集群用 ReplicatedMergeTree + Keeper。分区按天，TTL 只丢 part。快照按 <code>(segment_id, sequence)</code> 排序，时间范围靠 minmax 跳数索引。</p>
+      </div>
+      <div class="card">
+        <h3>读取任务</h3>
+        <p>多副本 Receiver 各自缓存。CK 短暂失败时保留上一份缓存并打 error，<strong>禁止</strong>把失败当成「无任务」——否则 Agent 会停采。</p>
+      </div>
+      <div class="card">
+        <h3>写入快照</h3>
+        <p>5000 行或 1s 攒批同步 INSERT。小流量可开 <code>async_insert</code>。不走外部 batch processor，避免 profile 和 traces 抢同一队列语义。</p>
+      </div>
+    </div>
+
+    <h2 class="sec" id="recv">8. Receiver 配置与职责边界</h2>
+    <pre><code>receivers:
+  skywalking_cola:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:21800
+    clickhouse:
+      dsn: tcp://ch-host:9000
+      database: otel
+      tasks_table: sw_profile_tasks
+      snapshots_table: sw_profile_snapshots
+      task_refresh_interval: 15s
+      insert_batch_size: 5000
+      insert_flush_interval: 1s
+
+service:
+  pipelines:
+    traces:
+      receivers: [skywalking_cola]
+      exporters: [clickhouse]   # 现有 traces 表
+    # profile 不进 pipeline，receiver 直写 CK</code></pre>
+
+    <div class="callout">
+      Profile 不进入 Collector logs/profiles pipeline。原因：任务要读 CK、快照要精确列类型、还要和同进程 traces 共享 LRU。硬塞 exporter 会丢掉这些约束。Traces / Metrics 保持原 pipeline。
+    </div>
+
+    <h3>第一版明确不做</h3>
+    <div class="pill-row">
+      <span class="pill">YAML 当任务主存储</span>
+      <span class="pill">写入 otel_logs / otel_profiles</span>
+      <span class="pill">查询时再 JOIN 补 TraceId 当主路径</span>
+      <span class="pill">eBPF / Continuous Profiling</span>
+      <span class="pill">HTTP 收 snapshot</span>
+      <span class="pill">Collector 内建任务 UI</span>
+    </div>
+
+    <h2 class="sec">9. 落地顺序</h2>
+    <table class="cmp">
+      <thead>
+        <tr><th>#</th><th>项</th><th>验收</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>1</td><td>两张表首次创建（无边表 / finish 表）</td><td>已落地</td></tr>
+        <tr><td>2</td><td>FINAL 去重 + 实例级 status</td><td>Finish 后该实例不再领任务</td></tr>
+        <tr><td>3</td><td>CollectSnapshot 按 sequence 写多行</td><td>同一 segment_id 可查时间线</td></tr>
+        <tr><td>4</td><td>查询时 ARRAY JOIN 画火焰图</td><td>单 segment / 任务级都能出</td></tr>
+      </tbody>
+    </table>
+
+    <footer>
+      文档对应仓库路径 <span class="mono">receiver/skywalkingreceiver-cola</span> ·
+      组件 type <span class="mono">skywalking_cola</span> ·
+      字段与下发逻辑对齐 <span class="mono">internal/profile/schema.sql</span> ·
+      <span class="mono">task.go</span> · <span class="mono">service.go</span>。
+    </footer>
+  </div>
+</body>
+</html>

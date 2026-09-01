@@ -220,6 +220,7 @@ components:
         - saphana
         - signalfx
         - skywalking
+        - skywalking_cola
         - snmp
         - snowflake
         - solace

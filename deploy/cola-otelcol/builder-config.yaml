@@ -1,0 +1,25 @@
+dist:
+  module: github.com/open-telemetry/opentelemetry-collector-contrib/cmd/otelcol-cola
+  name: otelcol-contrib
+  description: Cola OpenTelemetry Collector with skywalking_cola receiver
+  version: 0.159.0-cola
+  output_path: ./deploy/cola-otelcol/out
+
+extensions:
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/extension/encoding/skywalkingencodingextension v0.159.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/extension/encoding/otlpencodingextension v0.159.0
+
+receivers:
+  - gomod: go.opentelemetry.io/collector/receiver/otlpreceiver v0.159.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/kafkareceiver v0.159.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/skywalkingreceiver-cola v0.159.0
+    name: skywalkingreceivercola
+
+processors:
+  - gomod: go.opentelemetry.io/collector/processor/batchprocessor v0.159.0
+
+exporters:
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/exporter/clickhouseexporter v0.159.0
+
+# Local module replaces are appended by build.sh (relative to output_path).
+replaces:

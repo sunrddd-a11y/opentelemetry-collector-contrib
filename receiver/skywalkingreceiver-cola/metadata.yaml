@@ -1,0 +1,19 @@
+display_name: SkyWalking Cola Receiver
+type: skywalking_cola
+
+description: Receives trace data and metric data in [SkyWalking](https://skywalking.apache.org/) format.
+
+status:
+  class: receiver
+  stability:
+    development: [metrics]
+    beta: [traces]
+  distributions: [contrib]
+  codeowners:
+    active: [JaredTan95]
+
+tests:
+  config:
+    protocols:
+      grpc:
+        endpoint: localhost:1234

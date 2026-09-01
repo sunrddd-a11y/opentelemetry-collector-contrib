@@ -325,6 +325,7 @@ receiver/saphanareceiver
 receiver/simpleprometheusreceiver/examples/federation/prom-counter
 receiver/simpleprometheusreceiver
 receiver/skywalkingreceiver
+receiver/skywalkingreceiver-cola
 receiver/snmpreceiver
 receiver/snowflakereceiver
 receiver/solacereceiver

@@ -1,0 +1,14 @@
+# The following demonstrates how to enable protocols with defaults.
+skywalking_cola/defaults:
+  protocols:
+    grpc:
+skywalking_cola:
+  protocols:
+    grpc:
+      endpoint: 0.0.0.0:11800
+    http:
+      endpoint: 0.0.0.0:12800
+skywalking_cola/customname:
+  protocols:
+    http:
+      endpoint: 0.0.0.0:12801

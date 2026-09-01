@@ -349,6 +349,7 @@ receiver/riakreceiver/                                           @open-telemetry
 receiver/saphanareceiver/                                        @open-telemetry/collector-contrib-approvers @dehaansa
 receiver/signalfxreceiver/                                       @open-telemetry/collector-contrib-approvers @dmitryax
 receiver/skywalkingreceiver/                                     @open-telemetry/collector-contrib-approvers @JaredTan95
+receiver/skywalkingreceiver-cola/                                @open-telemetry/collector-contrib-approvers @JaredTan95
 receiver/snmpreceiver/                                           @open-telemetry/collector-contrib-approvers @tamir-michaeli
 receiver/snowflakereceiver/                                      @open-telemetry/collector-contrib-approvers @dmitryax @shalper2
 receiver/solacereceiver/                                         @open-telemetry/collector-contrib-approvers @mcardy

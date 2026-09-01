@@ -330,6 +330,7 @@ receiver/riakreceiver receiver/riak
 receiver/saphanareceiver receiver/saphana
 receiver/signalfxreceiver receiver/signalfx
 receiver/skywalkingreceiver receiver/skywalking
+receiver/skywalkingreceiver-cola receiver/skywalking_cola
 receiver/snmpreceiver receiver/snmp
 receiver/snowflakereceiver receiver/snowflake
 receiver/solacereceiver receiver/solace

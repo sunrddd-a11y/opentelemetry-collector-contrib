@@ -949,6 +949,10 @@ component_management:
     name: receiver_skywalking
     paths:
     - receiver/skywalkingreceiver/**
+  - component_id: receiver_skywalking_cola
+    name: receiver_skywalking_cola
+    paths:
+    - receiver/skywalkingreceiver-cola/**
   - component_id: receiver_snmp
     name: receiver_snmp
     paths:

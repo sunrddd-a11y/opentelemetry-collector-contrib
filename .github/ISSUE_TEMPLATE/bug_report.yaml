@@ -350,6 +350,7 @@ body:
       - receiver/signalfx
       - receiver/simpleprometheus
       - receiver/skywalking
+      - receiver/skywalking_cola
       - receiver/snmp
       - receiver/snowflake
       - receiver/solace

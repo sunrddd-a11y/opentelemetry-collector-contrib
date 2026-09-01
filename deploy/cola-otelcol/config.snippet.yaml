@@ -1,0 +1,14 @@
+# 17.16 现网已按此接入。OAP 占用 11800/12800，cola 用 21800/22800。
+receivers:
+  skywalking_cola:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:21800
+      http:
+        endpoint: 0.0.0.0:22800
+    clickhouse:
+      dsn: tcp://10.2.120.42:9000?username=default&password=URL_ENCODED_PASSWORD&database=otel
+      database: otel
+      create_schema: true
+
+# traces.receivers: [kafka, otlp, skywalking_cola]

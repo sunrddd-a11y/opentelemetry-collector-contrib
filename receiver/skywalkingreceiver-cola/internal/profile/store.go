@@ -23,11 +23,13 @@ type SnapshotRow struct {
 	StackLeafFirst  []string
 }
 
-// Store is the ClickHouse-backed (or test) persistence for profile data.
+// Store is the ClickHouse-backed (or test) persistence for profile data and agents.
 type Store interface {
 	LoadTasks(ctx context.Context) ([]Task, error)
 	InsertTask(ctx context.Context, task Task) error
 	InsertSnapshots(ctx context.Context, rows []SnapshotRow) error
+	GetAgent(ctx context.Context, agentType, service, instance string) (*AgentRow, error)
+	InsertAgent(ctx context.Context, row AgentRow) error
 	Close() error
 }
 
@@ -36,6 +38,7 @@ type MemoryStore struct {
 	mu        sync.Mutex
 	Tasks     []Task
 	Snapshots []SnapshotRow
+	Agents    []AgentRow
 	LoadErr   error
 	InsertErr error
 }
@@ -57,14 +60,14 @@ func (m *MemoryStore) InsertTask(_ context.Context, task Task) error {
 	if m.InsertErr != nil {
 		return m.InsertErr
 	}
-	if task.UpdatedAt.IsZero() {
-		task.UpdatedAt = time.Now()
+	if task.Tts.IsZero() {
+		task.Tts = time.Now()
 	}
 	if task.Status == "" {
 		task.Status = TaskStatusRunning
 	}
 	for i, cur := range m.Tasks {
-		if cur.Service == task.Service && cur.TaskID == task.TaskID && cur.ServiceInstance == task.ServiceInstance {
+		if cur.TaskID == task.TaskID {
 			m.Tasks[i] = task
 			return nil
 		}
@@ -84,3 +87,38 @@ func (m *MemoryStore) InsertSnapshots(_ context.Context, rows []SnapshotRow) err
 }
 
 func (m *MemoryStore) Close() error { return nil }
+func (m *MemoryStore) GetAgent(_ context.Context, agentType, service, instance string) (*AgentRow, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.LoadErr != nil {
+		return nil, m.LoadErr
+	}
+	var best *AgentRow
+	for i := range m.Agents {
+		row := m.Agents[i]
+		if row.AgentType != agentType || row.ServiceName != service || row.InstanceName != instance {
+			continue
+		}
+		if best == nil || row.LastTime.After(best.LastTime) {
+			cp := row
+			cp.Properties = cloneProperties(row.Properties)
+			best = &cp
+		}
+	}
+	return best, nil
+}
+
+func (m *MemoryStore) InsertAgent(_ context.Context, row AgentRow) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.InsertErr != nil {
+		return m.InsertErr
+	}
+	if row.LastTime.IsZero() {
+		row.LastTime = time.Now()
+	}
+	row.Properties = cloneProperties(row.Properties)
+	m.Agents = append(m.Agents, row)
+	return nil
+}
+

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	"go.opentelemetry.io/collector/consumer"
 	"go.uber.org/zap"
 )
 
@@ -46,6 +47,12 @@ func NewRuntime(store Store, segs *SegmentCache, logger *zap.Logger, refresh tim
 		logger:   logger,
 		interval: refresh,
 		done:     make(chan struct{}),
+	}
+}
+
+func (r *Runtime) SetLogsConsumer(lc consumer.Logs) {
+	if r.batcher != nil {
+		r.batcher.SetLogsConsumer(lc)
 	}
 }
 

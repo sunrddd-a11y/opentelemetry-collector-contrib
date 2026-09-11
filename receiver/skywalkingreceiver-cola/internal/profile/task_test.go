@@ -29,11 +29,17 @@ func TestTaskMatches(t *testing.T) {
 	t.Run("wrong service", func(t *testing.T) {
 		assert.False(t, base.Matches("other", "i1", 0, now))
 	})
-	t.Run("instance filter", func(t *testing.T) {
+	t.Run("instance ignored", func(t *testing.T) {
 		task := base
 		task.ServiceInstance = "i1"
 		assert.True(t, task.Matches("order-service", "i1", 0, now))
-		assert.False(t, task.Matches("order-service", "i2", 0, now))
+		assert.True(t, task.Matches("order-service", "i2", 0, now))
+	})
+	t.Run("deleted", func(t *testing.T) {
+		task := base
+		task.Deleted = 1
+		assert.False(t, task.Matches("order-service", "i1", 0, now))
+		assert.Equal(t, "deleted", task.skipReason("order-service", "i1", 0))
 	})
 	t.Run("already delivered", func(t *testing.T) {
 		assert.False(t, base.Matches("order-service", "i1", now.UnixMilli(), now))
@@ -62,7 +68,7 @@ func TestTaskMatches(t *testing.T) {
 	})
 }
 
-func TestMatchingSkipsFinishedInstanceAndDedupes(t *testing.T) {
+func TestMatchingDedupeByTaskIDLatestTts(t *testing.T) {
 	now := time.Now()
 	cache := NewTaskCache()
 	cache.Replace(dedupeLatestTasks([]Task{
@@ -72,39 +78,36 @@ func TestMatchingSkipsFinishedInstanceAndDedupes(t *testing.T) {
 			Enabled:    1,
 			CreateTime: now.Add(-time.Minute),
 			Status:     TaskStatusRunning,
-			UpdatedAt:  now.Add(-time.Minute),
-		},
-		{
-			TaskID:          "t1",
-			Service:         "order-service",
-			ServiceInstance: "i1",
-			Enabled:         1,
-			CreateTime:      now.Add(-time.Minute),
-			Status:          TaskStatusFinished,
-			UpdatedAt:       now,
+			Tts:        now.Add(-time.Minute),
 		},
 		{
 			TaskID:     "t1",
 			Service:    "order-service",
 			Enabled:    1,
 			CreateTime: now.Add(-time.Minute),
+			Status:     TaskStatusFinished,
+			Tts:        now,
+		},
+		{
+			TaskID:     "t2",
+			Service:    "order-service",
+			Enabled:    1,
+			CreateTime: now.Add(-time.Minute),
 			Status:     TaskStatusRunning,
-			UpdatedAt:  now.Add(-2 * time.Minute),
+			Deleted:    1,
+			Tts:        now,
 		},
 	}))
 
 	assert.Empty(t, cache.Matching("order-service", "i1", 0, now))
+	assert.Empty(t, cache.Matching("order-service", "i2", 0, now))
 	assert.Equal(t, "already_finished", cache.SkipReason(Task{
 		TaskID:     "t1",
 		Service:    "order-service",
 		Enabled:    1,
 		CreateTime: now.Add(-time.Minute),
+		Status:     TaskStatusFinished,
 	}, "order-service", "i1", 0))
-
-	got := cache.Matching("order-service", "i2", 0, now)
-	require.Len(t, got, 1)
-	assert.Equal(t, "t1", got[0].TaskID)
-	assert.Equal(t, "", got[0].ServiceInstance)
 }
 
 func TestTaskToCommandDurationMinutes(t *testing.T) {

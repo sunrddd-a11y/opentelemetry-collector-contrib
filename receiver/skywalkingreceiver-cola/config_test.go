@@ -126,4 +126,12 @@ func TestClickHouseValidate(t *testing.T) {
 	}
 	full.ClickHouse.DSN = "tcp://127.0.0.1:9000"
 	assert.EqualError(t, full.Validate(), "clickhouse profile support requires the grpc protocol")
+
+	cfg = defaultClickHouseConfig()
+	cfg.DSN = "tcp://127.0.0.1:9000"
+	cfg.ClusterName = "cas_cluster"
+	assert.EqualError(t, cfg.Validate(), "clickhouse.cluster_name and clickhouse.distributed_database must be set together")
+
+	cfg.DistributedDatabase = "dvotel"
+	assert.NoError(t, cfg.Validate())
 }

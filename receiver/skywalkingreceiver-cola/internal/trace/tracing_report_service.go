@@ -107,8 +107,16 @@ func (r *Receiver) consumeTraces(ctx context.Context, segment *agent.SegmentObje
 		return nil
 	}
 	ptd := skywalking.ProtoToTraces(segment)
+	stampSkyWalkingAgentType(ptd)
 	r.observeSegment(segment, ptd)
 	return r.nextConsumer.ConsumeTraces(ctx, ptd)
+}
+
+func stampSkyWalkingAgentType(td ptrace.Traces) {
+	rss := td.ResourceSpans()
+	for i := 0; i < rss.Len(); i++ {
+		rss.At(i).Resource().Attributes().PutStr(profile.AttrColaAgentType, profile.AgentTypeSkyWalking)
+	}
 }
 
 func (r *Receiver) observeSegment(segment *agent.SegmentObject, ptd ptrace.Traces) {

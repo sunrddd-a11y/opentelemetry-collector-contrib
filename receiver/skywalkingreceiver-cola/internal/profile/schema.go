@@ -30,7 +30,6 @@ func schemaStatements(cfg CHConfig) ([]string, error) {
 	}{
 		{"database", cfg.Database},
 		{"tasks_table", cfg.TasksTable},
-		{"snapshots_table", cfg.SnapshotsTable},
 	} {
 		if err := validateIdent(pair.value, pair.name); err != nil {
 			return nil, err
@@ -39,9 +38,8 @@ func schemaStatements(cfg CHConfig) ([]string, error) {
 
 	db := quoteIdent(cfg.Database)
 	tasks := qualified(cfg.Database, cfg.TasksTable)
-	snapshots := qualified(cfg.Database, cfg.SnapshotsTable)
 
-	return []string{
+	stmts := []string{
 		fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s", db),
 		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s
 (
@@ -59,35 +57,58 @@ func schemaStatements(cfg CHConfig) ([]string, error) {
 	enabled                   UInt8 DEFAULT 1,
 	status                    LowCardinality(String) DEFAULT 'running',
 	extra                     String DEFAULT '',
-	updated_at                DateTime64(3) DEFAULT now64(3)
+	` + "`delete`" + `                  UInt8 DEFAULT 0,
+	tts                       DateTime DEFAULT now() CODEC(DoubleDelta, LZ4)
 )
 ENGINE = ReplacingMergeTree
-ORDER BY (service, task_id, service_instance)
+ORDER BY task_id
 SETTINGS index_granularity = 8192`, tasks),
-		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s
-(
-	timestamp        DateTime64(3) CODEC(Delta, ZSTD(1)),
-	task_id          LowCardinality(String) CODEC(ZSTD(1)),
-	service          LowCardinality(String) CODEC(ZSTD(1)),
-	service_instance String CODEC(ZSTD(1)),
-	endpoint_name    LowCardinality(String) CODEC(ZSTD(1)),
-	otel_trace_id    String CODEC(ZSTD(1)),
-	sw_trace_id      String CODEC(ZSTD(1)),
-	segment_id       String CODEC(ZSTD(1)),
-	sequence         UInt32 CODEC(Delta, ZSTD(1)),
-	stack_leaf_first Array(String) CODEC(ZSTD(1)),
-	stack_root_first Array(String) MATERIALIZED arrayReverse(stack_leaf_first) CODEC(ZSTD(1)),
-	stack_hash       UInt64 MATERIALIZED xxHash64(arrayStringConcat(stack_root_first, '\n')) CODEC(ZSTD(1)),
-	stack_depth      UInt16 MATERIALIZED length(stack_root_first),
-	INDEX idx_otel_trace otel_trace_id TYPE bloom_filter(0.001) GRANULARITY 1,
-	INDEX idx_sw_trace   sw_trace_id   TYPE bloom_filter(0.001) GRANULARITY 1,
-	INDEX idx_task       task_id       TYPE bloom_filter(0.01)  GRANULARITY 1,
-	INDEX idx_ts         timestamp     TYPE minmax GRANULARITY 1
-)
-ENGINE = MergeTree
-PARTITION BY toDate(timestamp)
-ORDER BY (segment_id, sequence)
-TTL toDate(timestamp) + INTERVAL 14 DAY
-SETTINGS index_granularity = 8192, ttl_only_drop_parts = 1`, snapshots),
-	}, nil
+	}
+
+	dist, err := distributedStatements(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return append(stmts, dist...), nil
+}
+
+func distributedStatements(cfg CHConfig) ([]string, error) {
+	if cfg.ClusterName == "" {
+		return nil, nil
+	}
+	if err := validateIdent(cfg.ClusterName, "cluster_name"); err != nil {
+		return nil, err
+	}
+	if err := validateIdent(cfg.DistributedDatabase, "distributed_database"); err != nil {
+		return nil, err
+	}
+
+	cluster := quoteIdent(cfg.ClusterName)
+	localDB := quoteIdent(cfg.Database)
+	distDB := quoteIdent(cfg.DistributedDatabase)
+
+	tables := []string{cfg.TasksTable}
+
+	stmts := []string{
+		fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s ON CLUSTER %s", distDB, cluster),
+	}
+	for _, table := range tables {
+		if err := validateIdent(table, "distributed_local_table"); err != nil {
+			return nil, err
+		}
+		distTable := cfg.Database + "_" + table
+		if err := validateIdent(distTable, "distributed_table"); err != nil {
+			return nil, err
+		}
+		stmts = append(stmts, fmt.Sprintf(
+			"CREATE TABLE IF NOT EXISTS %s ON CLUSTER %s AS %s ENGINE = Distributed(%s, %s, %s)",
+			qualified(cfg.DistributedDatabase, distTable),
+			cluster,
+			qualified(cfg.Database, table),
+			cluster,
+			localDB,
+			quoteIdent(table),
+		))
+	}
+	return stmts, nil
 }

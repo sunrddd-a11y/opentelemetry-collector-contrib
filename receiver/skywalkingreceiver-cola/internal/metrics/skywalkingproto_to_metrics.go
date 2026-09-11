@@ -39,9 +39,10 @@ func SwMetricsToMetrics(collection *agent.JVMMetricCollection) pmetric.Metrics {
 
 func jvmMetricToResource(serviceName, serviceInstance string, resource pcommon.Resource) {
 	attrs := resource.Attributes()
-	attrs.EnsureCapacity(2)
+	attrs.EnsureCapacity(3)
 	attrs.PutStr(string(conventions.ServiceNameKey), serviceName)
 	attrs.PutStr(string(conventions.ServiceInstanceIDKey), serviceInstance)
+	attrs.PutStr("sw.cola.agent_type", "skywalking")
 }
 
 func jvmMetricToResourceMetrics(jvmMetric *agent.JVMMetric, sm pmetric.ScopeMetrics) {

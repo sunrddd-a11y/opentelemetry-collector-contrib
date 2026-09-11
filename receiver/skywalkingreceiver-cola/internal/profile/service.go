@@ -103,9 +103,6 @@ func (s *Service) enqueueSnapshot(snap *swprofile.ThreadSnapshot) {
 		if t, ok := s.tasks.ByID(row.TaskID); ok {
 			row.Service = t.Service
 			row.EndpointName = t.EndpointName
-			if t.ServiceInstance != "" {
-				row.ServiceInstance = t.ServiceInstance
-			}
 		}
 	}
 	if ident, ok := s.segs.Get(row.SegmentID); ok {
@@ -114,9 +111,7 @@ func (s *Service) enqueueSnapshot(snap *swprofile.ThreadSnapshot) {
 		if row.Service == "" {
 			row.Service = ident.Service
 		}
-		if row.ServiceInstance == "" {
-			row.ServiceInstance = ident.ServiceInstance
-		}
+		row.ServiceInstance = ident.ServiceInstance
 	}
 	if s.logger != nil && (row.Sequence == 0 || row.Sequence%50 == 0) {
 		s.logger.Info("profile snapshot received",
@@ -134,7 +129,7 @@ func (s *Service) ReportTaskFinish(ctx context.Context, in *swprofile.ProfileTas
 		return &common.Commands{}, nil
 	}
 	if s.store != nil && s.tasks != nil {
-		row, ok := s.tasks.templateForFinish(in.GetTaskId(), in.GetService(), in.GetServiceInstance())
+		row, ok := s.tasks.templateForFinish(in.GetTaskId(), in.GetService())
 		if !ok {
 			row = Task{
 				TaskID:     in.GetTaskId(),
@@ -146,9 +141,8 @@ func (s *Service) ReportTaskFinish(ctx context.Context, in *swprofile.ProfileTas
 		if in.GetService() != "" {
 			row.Service = in.GetService()
 		}
-		row.ServiceInstance = in.GetServiceInstance()
 		row.Status = TaskStatusFinished
-		row.UpdatedAt = time.Now()
+		row.Tts = time.Now()
 		if err := s.store.InsertTask(ctx, row); err != nil {
 			if s.logger != nil {
 				s.logger.Error("insert profile task finish failed", zap.Error(err), zap.String("task_id", in.GetTaskId()))

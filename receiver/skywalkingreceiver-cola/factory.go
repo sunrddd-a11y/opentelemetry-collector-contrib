@@ -40,6 +40,7 @@ func NewFactory() receiver.Factory {
 		createDefaultConfig,
 		receiver.WithTraces(createTracesReceiver, metadata.TracesStability),
 		receiver.WithMetrics(createMetricsReceiver, metadata.MetricsStability),
+		receiver.WithLogs(createLogsReceiver, metadata.LogsStability),
 	)
 }
 
@@ -122,6 +123,27 @@ func createMetricsReceiver(
 		return nil, err
 	}
 
+	return r, nil
+}
+
+func createLogsReceiver(
+	_ context.Context,
+	set receiver.Settings,
+	cfg component.Config,
+	nextConsumer consumer.Logs,
+) (receiver.Logs, error) {
+	rCfg := cfg.(*Config)
+
+	c, err := createConfiguration(rCfg)
+	if err != nil {
+		return nil, err
+	}
+
+	r := receivers.GetOrAdd(cfg, func() component.Component {
+		return newSkywalkingReceiver(c, set)
+	})
+
+	r.Unwrap().(*swReceiver).registerLogsConsumer(nextConsumer)
 	return r, nil
 }
 

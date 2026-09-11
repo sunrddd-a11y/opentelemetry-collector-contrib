@@ -31,11 +31,14 @@ type Protocols struct {
 
 // ClickHouseConfig controls profile task loading and snapshot persistence.
 type ClickHouseConfig struct {
-	DSN                 string        `mapstructure:"dsn"`
-	Database            string        `mapstructure:"database"`
-	TasksTable          string        `mapstructure:"tasks_table"`
-	SnapshotsTable      string        `mapstructure:"snapshots_table"`
-	CreateSchema        bool          `mapstructure:"create_schema"`
+	DSN                   string        `mapstructure:"dsn"`
+	Database              string        `mapstructure:"database"`
+	ClusterName           string        `mapstructure:"cluster_name"`
+	DistributedDatabase   string        `mapstructure:"distributed_database"`
+	TasksTable            string        `mapstructure:"tasks_table"`
+	SnapshotsTable        string        `mapstructure:"snapshots_table"`
+	AgentsTable           string        `mapstructure:"agents_table"`
+	CreateSchema          bool          `mapstructure:"create_schema"`
 	TaskRefreshInterval time.Duration `mapstructure:"task_refresh_interval"`
 	InsertBatchSize     int           `mapstructure:"insert_batch_size"`
 	InsertFlushInterval time.Duration `mapstructure:"insert_flush_interval"`
@@ -46,6 +49,7 @@ func defaultClickHouseConfig() ClickHouseConfig {
 		Database:            "otel",
 		TasksTable:          "sw_profile_tasks",
 		SnapshotsTable:      "sw_profile_snapshots",
+		AgentsTable:         "otel_agents",
 		CreateSchema:        true,
 		TaskRefreshInterval: 15 * time.Second,
 		InsertBatchSize:     5000,
@@ -71,9 +75,26 @@ func (c ClickHouseConfig) Validate() error {
 		{"database", c.Database},
 		{"tasks_table", c.TasksTable},
 		{"snapshots_table", c.SnapshotsTable},
+		{"agents_table", c.AgentsTable},
 	} {
 		if !clickhouseIdentRE.MatchString(pair.value) {
 			return fmt.Errorf("clickhouse.%s is not a valid identifier", pair.name)
+		}
+	}
+	if c.ClusterName != "" || c.DistributedDatabase != "" {
+		if c.ClusterName == "" || c.DistributedDatabase == "" {
+			return errors.New("clickhouse.cluster_name and clickhouse.distributed_database must be set together")
+		}
+		for _, pair := range []struct {
+			name  string
+			value string
+		}{
+			{"cluster_name", c.ClusterName},
+			{"distributed_database", c.DistributedDatabase},
+		} {
+			if !clickhouseIdentRE.MatchString(pair.value) {
+				return fmt.Errorf("clickhouse.%s is not a valid identifier", pair.name)
+			}
 		}
 	}
 	if c.TaskRefreshInterval <= 0 {

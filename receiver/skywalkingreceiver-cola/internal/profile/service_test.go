@@ -130,7 +130,7 @@ func TestCollectSnapshotAndFinish(t *testing.T) {
 	store.mu.Lock()
 	var finished Task
 	for _, task := range store.Tasks {
-		if task.TaskID == "t1" && task.ServiceInstance == "i1" && task.Status == TaskStatusFinished {
+		if task.TaskID == "t1" && task.Status == TaskStatusFinished {
 			finished = task
 		}
 	}

@@ -14,6 +14,7 @@ const (
 )
 
 // Task is one row from sw_profile_tasks after FINAL / latest-row collapse.
+// task_id is unique. service_instance is reserved and ignored at dispatch.
 type Task struct {
 	TaskID                 string
 	Service                string
@@ -29,7 +30,8 @@ type Task struct {
 	Enabled                uint8
 	Status                 string
 	Extra                  string
-	UpdatedAt              time.Time
+	Deleted                uint8
+	Tts                    time.Time
 }
 
 func (t Task) isFinished() bool {
@@ -46,7 +48,11 @@ func (t Task) statusOrRunning() string {
 // skipReason is empty when this task row itself is eligible.
 // Matching follows SkyWalking OAP: service name + createTime > lastCommandTime.
 // StartTime/Duration are sent to the agent; OAP does not filter them at dispatch.
-func (t Task) skipReason(service, serviceInstance string, lastCommandTime int64) string {
+// service_instance is ignored.
+func (t Task) skipReason(service, _ string, lastCommandTime int64) string {
+	if t.Deleted != 0 {
+		return "deleted"
+	}
 	if t.isFinished() {
 		return "already_finished"
 	}
@@ -55,9 +61,6 @@ func (t Task) skipReason(service, serviceInstance string, lastCommandTime int64)
 	}
 	if t.Service != service {
 		return "service_mismatch"
-	}
-	if t.ServiceInstance != "" && t.ServiceInstance != serviceInstance {
-		return "instance_mismatch"
 	}
 	if !t.CreateTime.After(time.UnixMilli(lastCommandTime)) {
 		return "already_delivered"
@@ -100,7 +103,7 @@ func (c *TaskCache) Upsert(t Task) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for i, cur := range c.tasks {
-		if cur.Service == t.Service && cur.TaskID == t.TaskID && cur.ServiceInstance == t.ServiceInstance {
+		if cur.TaskID == t.TaskID {
 			c.tasks[i] = t
 			return
 		}
@@ -111,30 +114,17 @@ func (c *TaskCache) Upsert(t Task) {
 func (c *TaskCache) ByID(id string) (Task, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	var fallback Task
-	var found bool
 	for _, t := range c.tasks {
-		if t.TaskID != id {
-			continue
-		}
-		if !t.isFinished() && t.Enabled == 1 {
+		if t.TaskID == id {
 			return t, true
 		}
-		if !found {
-			fallback = t
-			found = true
-		}
 	}
-	return fallback, found
+	return Task{}, false
 }
 
-func (c *TaskCache) templateForFinish(taskID, service, instance string) (Task, bool) {
+func (c *TaskCache) templateForFinish(taskID, service string) (Task, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	var broadcast Task
-	var hasBroadcast bool
-	var any Task
-	var hasAny bool
 	for _, t := range c.tasks {
 		if t.TaskID != taskID {
 			continue
@@ -142,63 +132,23 @@ func (c *TaskCache) templateForFinish(taskID, service, instance string) (Task, b
 		if service != "" && t.Service != service {
 			continue
 		}
-		if t.ServiceInstance == instance {
-			return t, true
-		}
-		if t.ServiceInstance == "" {
-			broadcast = t
-			hasBroadcast = true
-			continue
-		}
-		if !hasAny {
-			any = t
-			hasAny = true
-		}
+		return t, true
 	}
-	if hasBroadcast {
-		return broadcast, true
-	}
-	return any, hasAny
-}
-
-func (c *TaskCache) instanceFinished(taskID, serviceInstance string) bool {
-	for _, t := range c.tasks {
-		if t.TaskID == taskID && t.ServiceInstance == serviceInstance && t.isFinished() {
-			return true
-		}
-	}
-	return false
+	return Task{}, false
 }
 
 func (c *TaskCache) SkipReason(t Task, service, serviceInstance string, lastCommandTime int64) string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.dispatchReason(t, service, serviceInstance, lastCommandTime)
+	return t.skipReason(service, serviceInstance, lastCommandTime)
 }
 
-func (c *TaskCache) dispatchReason(t Task, service, serviceInstance string, lastCommandTime int64) string {
-	if reason := t.skipReason(service, serviceInstance, lastCommandTime); reason != "" {
-		return reason
-	}
-	if c.instanceFinished(t.TaskID, serviceInstance) {
-		return "already_finished"
-	}
-	return ""
-}
-
-func (c *TaskCache) Matching(service, serviceInstance string, lastCommandTime int64, now time.Time) []Task {
+func (c *TaskCache) Matching(service, serviceInstance string, lastCommandTime int64, _ time.Time) []Task {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	best := make(map[string]Task, len(c.tasks))
 	for _, t := range c.tasks {
-		if c.dispatchReason(t, service, serviceInstance, lastCommandTime) != "" {
-			continue
-		}
-		if prev, ok := best[t.TaskID]; ok {
-			// Prefer the instance-specific row over a broadcast row.
-			if prev.ServiceInstance == "" && t.ServiceInstance != "" {
-				best[t.TaskID] = t
-			}
+		if t.skipReason(service, serviceInstance, lastCommandTime) != "" {
 			continue
 		}
 		best[t.TaskID] = t
@@ -213,28 +163,27 @@ func (c *TaskCache) Matching(service, serviceInstance string, lastCommandTime in
 	return out
 }
 
-// dedupeLatestTasks keeps one row per (service, task_id, service_instance).
-// FINAL can still leave duplicates before parts merge; latest updated_at wins.
+// dedupeLatestTasks keeps one row per task_id. FINAL can still leave
+// duplicates before parts merge; latest tts wins. Soft-deleted rows are dropped.
 func dedupeLatestTasks(tasks []Task) []Task {
-	type key struct {
-		service, taskID, instance string
-	}
-	best := make(map[key]Task, len(tasks))
+	best := make(map[string]Task, len(tasks))
 	for _, t := range tasks {
 		if t.Status == "" {
 			t.Status = TaskStatusRunning
 		}
-		k := key{t.Service, t.TaskID, t.ServiceInstance}
-		if prev, ok := best[k]; ok && !t.UpdatedAt.After(prev.UpdatedAt) {
+		if prev, ok := best[t.TaskID]; ok && !t.Tts.After(prev.Tts) {
 			continue
 		}
-		best[k] = t
+		best[t.TaskID] = t
 	}
 	if len(best) == 0 {
 		return nil
 	}
 	out := make([]Task, 0, len(best))
 	for _, t := range best {
+		if t.Deleted != 0 {
+			continue
+		}
 		out = append(out, t)
 	}
 	return out

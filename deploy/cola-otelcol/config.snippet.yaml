@@ -9,6 +9,34 @@ receivers:
     clickhouse:
       dsn: tcp://10.2.120.42:9000?username=default&password=URL_ENCODED_PASSWORD&database=otel
       database: otel
+      cluster_name: cas_cluster
+      distributed_database: dvotel
       create_schema: true
 
-# traces.receivers: [kafka, otlp, skywalking_cola]
+exporters:
+  clickhouse_cola:
+    endpoint: tcp://10.2.120.42:9000?username=default&password=URL_ENCODED_PASSWORD
+    database: otel
+    cluster_name: cas_cluster
+    distributed_database: dvotel
+    create_schema: true
+    license:
+      enabled: true
+      refresh_interval: 30s
+      agents_table: dvotel.csotel_otel_agents
+      license_table: dvutl.csutl_tconfig_public
+      dict_type: 30
+
+# traces/metrics/logs:
+#   receivers: [kafka, otlp, skywalking_cola]
+#   exporters: [clickhouse_cola]
+#
+# 运行日志写到 ./logs/collector.log（compose 需挂 ./logs:/var/log/otelcol）:
+# service:
+#   telemetry:
+#     logs:
+#       level: info
+#       encoding: console
+#       output_paths:
+#         - stderr
+#         - /var/log/otelcol/collector.log

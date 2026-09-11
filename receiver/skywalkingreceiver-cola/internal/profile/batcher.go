@@ -8,12 +8,14 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/collector/consumer"
 	"go.uber.org/zap"
 )
 
 // Batcher accumulates snapshots and flushes them in ClickHouse-friendly batches.
 type Batcher struct {
 	store    Store
+	logs     consumer.Logs
 	logger   *zap.Logger
 	maxSize  int
 	interval time.Duration
@@ -40,8 +42,15 @@ func NewBatcher(store Store, logger *zap.Logger, maxSize int, interval time.Dura
 	}
 }
 
+func (b *Batcher) SetLogsConsumer(lc consumer.Logs) {
+	if b == nil {
+		return
+	}
+	b.logs = lc
+}
+
 func (b *Batcher) Start() {
-	if b == nil || b.store == nil {
+	if b == nil || (b.store == nil && b.logs == nil) {
 		return
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -64,7 +73,7 @@ func (b *Batcher) loop(ctx context.Context) {
 }
 
 func (b *Batcher) Add(row SnapshotRow) {
-	if b == nil || b.store == nil {
+	if b == nil || (b.store == nil && b.logs == nil) {
 		return
 	}
 	var overflow []SnapshotRow
@@ -92,6 +101,15 @@ func (b *Batcher) flush(ctx context.Context) {
 }
 
 func (b *Batcher) send(ctx context.Context, rows []SnapshotRow) {
+	if b.logs != nil {
+		if err := b.logs.ConsumeLogs(ctx, SnapshotsToLogs(rows)); err != nil && b.logger != nil {
+			b.logger.Error("export profile snapshots failed", zap.Error(err), zap.Int("rows", len(rows)))
+		}
+		return
+	}
+	if b.store == nil {
+		return
+	}
 	if err := b.store.InsertSnapshots(ctx, rows); err != nil && b.logger != nil {
 		b.logger.Error("insert profile snapshots failed", zap.Error(err), zap.Int("rows", len(rows)))
 	}

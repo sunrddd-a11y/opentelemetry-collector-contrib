@@ -20,6 +20,8 @@ processors:
 
 exporters:
   - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/exporter/clickhouseexporter v0.159.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/exporter/clickhouseexporter-cola v0.159.0
+    name: clickhouseexportercola
 
 # Local module replaces are appended by build.sh (relative to output_path).
 replaces:

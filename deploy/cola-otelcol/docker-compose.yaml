@@ -1,0 +1,11 @@
+services:
+  otel-collector:
+    image: otel-collector-contrib:cola-v0.159.0-20260910-4
+    # 日志级别: debug / info / warn / error
+    command:
+      - --config=/etc/otelcol-contrib/config.yaml
+      - --set=service.telemetry.logs.level=info
+    volumes:
+      - ./config.yaml:/etc/otelcol-contrib/config.yaml
+      - ./logs:/var/log/otelcol
+    network_mode: host

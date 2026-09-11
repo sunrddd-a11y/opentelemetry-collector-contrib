@@ -61,6 +61,8 @@ type swReceiver struct {
 	dummyReportService *dummyReportService
 	profileRuntime     *swprofile.Runtime
 	segmentCache       *swprofile.SegmentCache
+	agentStore         swprofile.Store
+	logsConsumer       consumer.Logs
 }
 
 // newSkywalkingReceiver creates a TracesReceiver that receives traffic as a Skywalking collector
@@ -96,6 +98,10 @@ func (sr *swReceiver) registerMetricsConsumer(mc consumer.Metrics) error {
 		return err
 	}
 	return nil
+}
+
+func (sr *swReceiver) registerLogsConsumer(lc consumer.Logs) {
+	sr.logsConsumer = lc
 }
 
 func (sr *swReceiver) collectorGRPCAddr() string {
@@ -187,7 +193,11 @@ func (sr *swReceiver) startCollector(host component.Host) error {
 		if sr.metricsReceiver != nil {
 			v3.RegisterJVMMetricReportServiceServer(sr.grpc, sr.metricsReceiver)
 		}
-		sr.dummyReportService = &dummyReportService{}
+		sr.dummyReportService = &dummyReportService{
+			agents: sr.agentStore,
+			logs:   sr.logsConsumer,
+			logger: sr.settings.Logger,
+		}
 		management.RegisterManagementServiceServer(sr.grpc, sr.dummyReportService)
 		cds.RegisterConfigurationDiscoveryServiceServer(sr.grpc, sr.dummyReportService)
 		event.RegisterEventServiceServer(sr.grpc, &eventService{})
@@ -213,15 +223,19 @@ func (sr *swReceiver) startProfile(ctx context.Context) error {
 	if sr.config != nil && sr.config.ClickHouse.Enabled() {
 		var err error
 		store, err = swprofile.NewCHStore(swprofile.CHConfig{
-			DSN:             sr.config.ClickHouse.DSN,
-			Database:        sr.config.ClickHouse.Database,
-			TasksTable:     sr.config.ClickHouse.TasksTable,
-			SnapshotsTable: sr.config.ClickHouse.SnapshotsTable,
-			CreateSchema:   sr.config.ClickHouse.CreateSchema,
+			DSN:                 sr.config.ClickHouse.DSN,
+			Database:            sr.config.ClickHouse.Database,
+			ClusterName:         sr.config.ClickHouse.ClusterName,
+			DistributedDatabase: sr.config.ClickHouse.DistributedDatabase,
+			TasksTable:          sr.config.ClickHouse.TasksTable,
+			SnapshotsTable:      sr.config.ClickHouse.SnapshotsTable,
+			AgentsTable:         sr.config.ClickHouse.AgentsTable,
+			CreateSchema:        sr.config.ClickHouse.CreateSchema,
 		})
 		if err != nil {
 			return err
 		}
+		sr.agentStore = store
 	}
 
 	ch := defaultClickHouseConfig()
@@ -245,6 +259,7 @@ func (sr *swReceiver) startProfile(ctx context.Context) error {
 		ch.InsertBatchSize,
 		ch.InsertFlushInterval,
 	)
+	sr.profileRuntime.SetLogsConsumer(sr.logsConsumer)
 	if err := sr.profileRuntime.Start(ctx); err != nil {
 		_ = sr.profileRuntime.Shutdown(ctx)
 		sr.profileRuntime = nil

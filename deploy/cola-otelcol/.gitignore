@@ -3,3 +3,5 @@ otelcol-contrib
 *.tar
 builder-config-replaced.yaml
 config.remote.yaml
+config.120.*.yaml
+logs/

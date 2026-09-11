@@ -4,6 +4,7 @@
 package profile
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -12,31 +13,45 @@ import (
 
 func TestSchemaStatements(t *testing.T) {
 	stmts, err := schemaStatements(CHConfig{
-		Database:       "otel",
-		TasksTable:     "sw_profile_tasks",
-		SnapshotsTable: "sw_profile_snapshots",
+		Database:   "otel",
+		TasksTable: "sw_profile_tasks",
 	})
 	require.NoError(t, err)
-	require.Len(t, stmts, 3)
+	require.Len(t, stmts, 2)
 	assert.Contains(t, stmts[0], "CREATE DATABASE IF NOT EXISTS `otel`")
 	assert.Contains(t, stmts[1], "CREATE TABLE IF NOT EXISTS `otel`.`sw_profile_tasks`")
 	assert.Contains(t, stmts[1], "ENGINE = ReplacingMergeTree")
-	assert.Contains(t, stmts[1], "ORDER BY (service, task_id, service_instance)")
-	assert.Contains(t, stmts[1], "status                    LowCardinality(String) DEFAULT 'running'")
-	assert.NotContains(t, stmts[1], "ReplacingMergeTree(")
-	assert.Contains(t, stmts[2], "CREATE TABLE IF NOT EXISTS `otel`.`sw_profile_snapshots`")
-	assert.Contains(t, stmts[2], "ENGINE = MergeTree")
-	assert.Contains(t, stmts[2], "ORDER BY (segment_id, sequence)")
-	assert.Contains(t, stmts[2], "INDEX idx_ts         timestamp     TYPE minmax GRANULARITY 1")
-	assert.NotContains(t, stmts[2], "sw_profile_flame_edges")
-	assert.NotContains(t, stmts[2], "sw_profile_task_finish")
+	assert.Contains(t, stmts[1], "ORDER BY task_id")
+	assert.Contains(t, stmts[1], "`delete`                  UInt8 DEFAULT 0")
+	joined := strings.Join(stmts, "\n")
+	assert.NotContains(t, joined, "sw_profile_snapshots")
+	assert.NotContains(t, joined, "otel_agents")
+	assert.NotContains(t, joined, "otel_agent_mv")
+	assert.NotContains(t, joined, "ON CLUSTER")
+}
+
+func TestSchemaStatementsDistributed(t *testing.T) {
+	stmts, err := schemaStatements(CHConfig{
+		Database:            "csotel",
+		ClusterName:         "cas_cluster",
+		DistributedDatabase: "dvotel",
+		TasksTable:          "sw_profile_tasks",
+	})
+	require.NoError(t, err)
+	require.Len(t, stmts, 2+1+1)
+	joined := strings.Join(stmts, "\n")
+	assert.Contains(t, stmts[2], "CREATE DATABASE IF NOT EXISTS `dvotel` ON CLUSTER `cas_cluster`")
+	assert.Contains(t, joined, "`dvotel`.`csotel_sw_profile_tasks`")
+	assert.NotContains(t, joined, "otel_traces")
+	assert.NotContains(t, joined, "otel_agents")
+	assert.NotContains(t, joined, "sw_profile_snapshots")
+	assert.NotContains(t, joined, "MATERIALIZED VIEW")
 }
 
 func TestSchemaStatementsRejectsBadIdent(t *testing.T) {
 	_, err := schemaStatements(CHConfig{
-		Database:       "otel",
-		TasksTable:     "sw_profile_tasks",
-		SnapshotsTable: "bad-name",
+		Database:   "otel",
+		TasksTable: "bad-name",
 	})
 	require.Error(t, err)
 }
